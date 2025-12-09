@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -18,7 +17,11 @@ import {
   Copy,
   Briefcase,
   User,
-  StickyNote
+  StickyNote,
+  Trash2,
+  ClipboardPaste,
+  Download,
+  Upload
 } from 'lucide-react';
 import { Task, ModalType } from './types';
 import { 
@@ -67,13 +70,17 @@ const App: React.FC = () => {
   const [selectedDateKey, setSelectedDateKey] = useState<string>('');
   const [drawerMode, setDrawerMode] = useState<'list' | 'form'>('list');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [initialTaskColor, setInitialTaskColor] = useState<string>(PERSONAL_COLOR); // Passed to form
+  const [initialTaskColor, setInitialTaskColor] = useState<string>(PERSONAL_COLOR); 
 
   // Batch Selection State
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [copyMonthsCount, setCopyMonthsCount] = useState<number>(1);
   const [showBatchSuccess, setShowBatchSuccess] = useState(false);
+
+  // New Features: Clipboard & Backup
+  const [clipboardTask, setClipboardTask] = useState<Task | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Effects ---
 
@@ -89,14 +96,12 @@ const App: React.FC = () => {
     if (todaysTasks.length > 0) {
       setModalType(ModalType.REMINDER);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
   useEffect(() => {
     saveTasks(tasks);
   }, [tasks]);
 
-  // Reset selection mode when drawer closes or date changes
   useEffect(() => {
     if (!isDrawerOpen) {
       setIsSelectionMode(false);
@@ -138,9 +143,8 @@ const App: React.FC = () => {
     setIsDrawerOpen(true);
   };
 
-  // Quick Toggle Logic
   const toggleTaskCompletion = (e: React.MouseEvent, taskId: string) => {
-    e.stopPropagation(); // Prevent opening the drawer
+    e.stopPropagation();
     setTasks(prev => prev.map(t => 
       t.id === taskId ? { ...t, completed: !t.completed } : t
     ));
@@ -173,7 +177,96 @@ const App: React.FC = () => {
     setEditingTask(null);
   };
 
-  // Batch Selection Logic
+  // --- Advanced Actions (Copy/Paste/Delete) ---
+
+  const handleCopyTask = (e: React.MouseEvent, task: Task) => {
+    e.stopPropagation();
+    setClipboardTask(task);
+    alert(`已复制任务: "${task.title}"\n请切换到目标日期，点击底部的粘贴按钮。`);
+  };
+
+  const handlePasteTask = () => {
+    if (!clipboardTask) return;
+    
+    const newTask: Task = {
+        id: crypto.randomUUID(),
+        date: selectedDateKey,
+        title: clipboardTask.title,
+        description: clipboardTask.description,
+        color: clipboardTask.color,
+        completed: false
+    };
+    
+    saveTask(newTask);
+    alert('粘贴成功！');
+  };
+
+  const handleQuickDelete = (e: React.MouseEvent, taskId: string) => {
+     e.stopPropagation();
+     if(window.confirm('确定要删除这个任务吗？')) {
+         deleteTask(taskId);
+     }
+  };
+
+  // --- Backup & Restore ---
+
+  const handleExportData = () => {
+    const dataToExport = {
+        tasks: tasks,
+        monthlyNotes: monthlyNotes,
+        exportDate: new Date().toISOString(),
+        version: "1.0"
+    };
+    
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aoe-calendar-backup-${formatDateKey(new Date())}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const result = e.target?.result as string;
+            const importedData = JSON.parse(result);
+            
+            if (importedData.tasks && Array.isArray(importedData.tasks)) {
+                if (window.confirm(`准备导入备份数据：\n\n包含 ${importedData.tasks.length} 个任务\n\n这将覆盖当前的数据，确定要继续吗？`)) {
+                    setTasks(importedData.tasks);
+                    if (importedData.monthlyNotes) {
+                        setMonthlyNotes(importedData.monthlyNotes);
+                        saveMonthlyNotes(importedData.monthlyNotes);
+                    }
+                    saveTasks(importedData.tasks);
+                    alert("✅ 数据恢复成功！");
+                }
+            } else {
+                alert("❌ 文件格式错误：这似乎不是有效的备份文件。");
+            }
+        } catch (error: any) {
+            alert("❌ 读取文件失败：" + error.message);
+        }
+    };
+    reader.readAsText(file);
+    if (event.target) event.target.value = ''; // reset input
+  };
+
+
+  // --- Batch Logic ---
   const toggleTaskSelection = (taskId: string) => {
     const newSet = new Set(selectedTaskIds);
     if (newSet.has(taskId)) {
@@ -205,7 +298,7 @@ const App: React.FC = () => {
           title: task.title,
           description: task.description,
           completed: false, 
-          color: task.color, // Preserve color
+          color: task.color,
         });
       }
     });
@@ -261,7 +354,7 @@ const App: React.FC = () => {
 
   // --- Render ---
   return (
-    <div className="min-h-screen pb-12 pt-6 px-4 sm:px-8 flex flex-col items-center relative overflow-hidden text-slate-800">
+    <div className="min-h-screen pb-20 pt-6 px-4 sm:px-8 flex flex-col items-center relative overflow-hidden text-slate-800">
       
       {/* Background Stickers */}
       <Sticker icon={Crown} className="top-10 left-10 text-blue-300 rotate-[-12deg]" />
@@ -278,7 +371,7 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-              日历小本本 <Heart size={20} className="text-pink-500 fill-pink-500 animate-bounce" />
+              发疯日程 <Heart size={20} className="text-pink-500 fill-pink-500 animate-bounce" />
             </h1>
             <p className="text-sm text-blue-400 font-bold tracking-wider">AOE's Calendar</p>
           </div>
@@ -365,7 +458,6 @@ const App: React.FC = () => {
                 {/* Tasks List */}
                 <div className="flex flex-col gap-1.5 overflow-hidden w-full">
                   {dayTasks.map(task => {
-                    // Determine styles based on task color
                     const taskColor = task.color || PERSONAL_COLOR;
                     const bgStyle = { backgroundColor: hexToRgba(taskColor, 0.1) };
                     const textStyle = { color: taskColor };
@@ -383,7 +475,6 @@ const App: React.FC = () => {
                             : 'hover:opacity-80 hover:scale-[1.02]'}
                         `}
                       >
-                        {/* Checkbox Button */}
                         <button 
                           onClick={(e) => toggleTaskCompletion(e, task.id)}
                           className={`
@@ -410,7 +501,6 @@ const App: React.FC = () => {
       {/* Monthly Note Section */}
       <div className="w-full max-w-6xl relative z-10 mb-12">
         <div className="relative bg-[#fffbeb] p-8 rounded-[2rem] shadow-xl shadow-yellow-100/50 border-4 border-white rotate-1 transform transition-transform hover:rotate-0 group">
-          {/* Note Decoration */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-4 w-32 h-8 bg-yellow-200/50 rounded-sm transform rotate-1 shadow-sm"></div>
           
           <div className="flex items-center gap-3 mb-4 text-yellow-700">
@@ -449,7 +539,6 @@ const App: React.FC = () => {
                   {selectedDateKey}
                 </div>
                 
-                {/* Batch Selection Toggle */}
                 <button
                   onClick={toggleSelectionMode}
                   className={`
@@ -529,11 +618,6 @@ const App: React.FC = () => {
                          >
                            {task.title}
                          </h4>
-                         {!isSelectionMode && (
-                           <div className="opacity-0 group-hover:opacity-100 p-1.5 bg-gray-100 rounded-full text-gray-500 hover:bg-blue-500 hover:text-white transition-all">
-                              <Pencil size={14} />
-                           </div>
-                         )}
                        </div>
                        <p className={`
                          text-sm font-medium line-clamp-2
@@ -542,6 +626,26 @@ const App: React.FC = () => {
                          {task.description || '无详细内容...'}
                        </p>
                      </div>
+
+                     {/* Quick Actions (Copy & Delete) */}
+                     {!isSelectionMode && (
+                       <div className="flex flex-col gap-2 ml-1 items-center justify-center border-l pl-2 border-gray-100">
+                          <button 
+                             onClick={(e) => handleCopyTask(e, task)}
+                             className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-colors"
+                             title="复制这个任务"
+                          >
+                             <Copy size={18} />
+                          </button>
+                          <button 
+                             onClick={(e) => handleQuickDelete(e, task.id)}
+                             className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                             title="快速删除"
+                          >
+                             <Trash2 size={18} />
+                          </button>
+                       </div>
+                     )}
                    </div>
                  )})
                )}
@@ -586,6 +690,17 @@ const App: React.FC = () => {
                  </div>
                ) : (
                  <div className="flex flex-col gap-3">
+                   {/* Paste Button */}
+                   {clipboardTask && (
+                       <button 
+                         onClick={handlePasteTask}
+                         className="w-full py-3.5 bg-[#C7CEEA] text-slate-700 font-bold rounded-2xl hover:brightness-95 shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 mb-2 border-2 border-white"
+                       >
+                         <ClipboardPaste size={20} strokeWidth={2.5} />
+                         <span>粘贴任务: {clipboardTask.title}</span>
+                       </button>
+                   )}
+
                    {/* Personal Button */}
                    <button 
                      onClick={handleAddNewPersonalTask}
@@ -670,11 +785,36 @@ const App: React.FC = () => {
         </div>
       </Modal>
       
-      {/* Footer */}
-      <div className="mt-8 text-center relative z-10 pb-4">
+      {/* Footer: Backup & Restore */}
+      <div className="mt-8 mb-4 text-center relative z-10 flex flex-col items-center gap-4">
         <p className="text-blue-400 text-xs font-bold tracking-widest uppercase bg-white/60 inline-block px-4 py-1.5 rounded-full backdrop-blur-sm shadow-sm border border-white">
           ✨ Auto Saved with Magic ✨
         </p>
+
+        <div className="flex gap-4">
+          <button 
+            onClick={handleExportData}
+            className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl shadow-sm text-sm font-bold text-gray-600 hover:text-blue-600 hover:shadow-md transition-all active:scale-95"
+          >
+            <Download size={16} />
+            备份数据
+          </button>
+
+          <button 
+            onClick={handleImportClick}
+            className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl shadow-sm text-sm font-bold text-gray-600 hover:text-blue-600 hover:shadow-md transition-all active:scale-95"
+          >
+            <Upload size={16} />
+            恢复数据
+          </button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept=".json" 
+            className="hidden" 
+          />
+        </div>
       </div>
     </div>
   );
