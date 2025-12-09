@@ -6,6 +6,7 @@ export interface Task {
   description: string;
   completed: boolean;
   color?: string; // New field for task color
+  user_id?: string; // For Supabase RLS
 }
 
 export interface CalendarDay {
@@ -18,5 +19,7 @@ export interface CalendarDay {
 export enum ModalType {
   NONE,
   ADD_EDIT,
-  REMINDER
+  REMINDER,
+  AI_WIZARD, // AI 助手弹窗
+  AUTH // 登录/设置弹窗
 }
