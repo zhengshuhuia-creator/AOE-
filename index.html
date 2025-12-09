@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>AOE's Calendar</title>
+    
+    <!-- iOS PWA 专属配置 (让它像 App 一样运行) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- App 图标 (当添加到主屏幕时显示) -->
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/10691/10691802.png">
+    <!-- 启动画面 (简单适配) -->
+    <link rel="apple-touch-startup-image" href="https://cdn-icons-png.flaticon.com/512/10691/10691802.png">
+    
+    <!-- 国内 CDN 引入 Tailwind CSS -->
+    <script src="https://cdn.staticfile.org/tailwindcss/3.3.5/tailwind.min.js"></script>
+    
+    <!-- React 核心库 (Staticfile 国内源) -->
+    <script crossorigin src="https://cdn.staticfile.org/react/18.2.0/umd/react.development.js"></script>
+    <script crossorigin src="https://cdn.staticfile.org/react-dom/18.2.0/umd/react-dom.development.js"></script>
+    
+    <!-- Babel 用于浏览器内编译 JSX (Staticfile 国内源) -->
+    <script src="https://cdn.staticfile.org/babel-standalone/7.23.5/babel.min.js"></script>
+
+    <!-- 谷歌字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+    <style>
+      body {
+        font-family: 'Noto Sans SC', sans-serif;
+        background-color: #eff6ff; /* blue-50 */
+        /* Cute polka dot pattern */
+        background-image: radial-gradient(#93c5fd 2px, transparent 2px); /* blue-300 */
+        background-size: 24px 24px;
+        -webkit-tap-highlight-color: transparent;
+        /* iOS Safe Area Support */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        overscroll-behavior-y: none; /* Prevent rubber-banding on iOS */
+      }
+      
+      /* Global Transitions */
+      * {
+        transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+        transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); /* Bouncy spring */
+        transition-duration: 300ms;
+      }
+
+      /* Checkbox Check Animation */
+      @keyframes check-pop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.3); }
+        100% { transform: scale(1); }
+      }
+      .check-anim:active {
+        animation: check-pop 0.2s ease-in-out;
+      }
+
+      /* Custom Scrollbar */
+      .task-scroll::-webkit-scrollbar {
+        width: 6px;
+      }
+      .task-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .task-scroll::-webkit-scrollbar-thumb {
+        background-color: #bfdbfe; /* blue-200 */
+        border-radius: 20px;
+      }
+      .task-scroll::-webkit-scrollbar-thumb:hover {
+        background-color: #60a5fa; /* blue-400 */
+      }
+      
+      /* Sticker Effect */
+      .sticker {
+        filter: drop-shadow(2px 4px 0px rgba(0,0,0,0.1));
+        stroke-width: 2.5px;
+      }
+      
+      @keyframes slideUp {
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      
+      @keyframes bounceIn {
+        0% { opacity: 0; transform: scale(0.9); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+
+      /* Hide scrollbar for clean look in some containers */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- ICONS (Lucide SVG Paths manually defined) ---
+        const IconBase = ({ size = 24, className = "", children, ...props }) => (
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width={size} 
+                height={size} 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={className} 
+                {...props}
+            >
+                {children}
+            </svg>
+        );
+
+        const ChevronLeft = (p) => <IconBase {...p}><path d="m15 18-6-6 6-6"/></IconBase>;
+        const ChevronRight = (p) => <IconBase {...p}><path d="m9 18 6-6-6-6"/></IconBase>;
+        const CheckCircle2 = (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></IconBase>;
+        const Circle = (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/></IconBase>;
+        const Sparkles = (p) => <IconBase {...p}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L12 3Z"/></IconBase>;
+        const Plus = (p) => <IconBase {...p}><path d="M5 12h14"/><path d="M12 5v14"/></IconBase>;
+        const Pencil = (p) => <IconBase {...p}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></IconBase>;
+        const Heart = (p) => <IconBase {...p}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></IconBase>;
+        const Star = (p) => <IconBase {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></IconBase>;
+        const Crown = (p) => <IconBase {...p}><path d="m2 4 3 12h14l3-12-6 7-4-3-4 3-6-7zm5 16h10"/></IconBase>;
+        const Zap = (p) => <IconBase {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></IconBase>;
+        const Music = (p) => <IconBase {...p}><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></IconBase>;
+        const Layers = (p) => <IconBase {...p}><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></IconBase>;
+        const Check = (p) => <IconBase {...p}><path d="M20 6 9 17l-5-5"/></IconBase>;
+        const Copy = (p) => <IconBase {...p}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></IconBase>;
+        const Briefcase = (p) => <IconBase {...p}><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></IconBase>;
+        const User = (p) => <IconBase {...p}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></IconBase>;
+        const StickyNote = (p) => <IconBase {...p}><path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/><path d="M15 3v6h6"/></IconBase>;
+        const Trash2 = (p) => <IconBase {...p}><path d="M3 6h18"/><path d="M19 6v14c0 1.1-.9 2-2 2H7c-1.1 0-2-.9-2-2V6"/><path d="M8 6V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></IconBase>;
+        const Save = (p) => <IconBase {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></IconBase>;
+        const CalendarIcon = (p) => <IconBase {...p}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></IconBase>;
+        const ArrowLeft = (p) => <IconBase {...p}><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></IconBase>;
+        const XIcon = (p) => <IconBase {...p}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></IconBase>;
+        const CloudCog = (p) => <IconBase {...p}><path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9"/><circle cx="12" cy="17" r="3"/><path d="m15.6 15.6-1.5 1.5"/><path d="m15.6 18.4-1.5-1.5"/><path d="m10 15.6 1.5 1.5"/><path d="m10 18.4 1.5-1.5"/></IconBase>;
+        const Download = (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>;
+        const Upload = (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></IconBase>;
+        const ClipboardCheck = (p) => <IconBase {...p}><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></IconBase>;
+
+        // --- UTILS ---
+        
+        const ModalType = { NONE: 0, ADD_EDIT: 1, REMINDER: 2 };
+
+        const formatDateKey = (date) => {
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, '0');
+          const d = String(date.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        };
+
+        const getMonthKey = (date) => {
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, '0');
+          return `${y}-${m}`;
+        };
+
+        const addMonthsToDate = (dateStr, monthsToAdd) => {
+          const [y, m, d] = dateStr.split('-').map(Number);
+          const targetDate = new Date(y, m - 1 + monthsToAdd, d);
+          if (targetDate.getDate() !== d) { targetDate.setDate(0); }
+          return formatDateKey(targetDate);
+        };
+
+        const generateCalendarGrid = (currentDate) => {
+          const year = currentDate.getFullYear();
+          const month = currentDate.getMonth();
+          const firstDayOfMonth = new Date(year, month, 1);
+          const lastDayOfMonth = new Date(year, month + 1, 0);
+          const startDayOfWeek = firstDayOfMonth.getDay(); 
+          
+          const days = [];
+          const todayKey = formatDateKey(new Date());
+
+          for (let i = startDayOfWeek - 1; i >= 0; i--) {
+            const d = new Date(year, month, -i); 
+            days.push({
+              date: d,
+              isCurrentMonth: false,
+              isToday: formatDateKey(d) === todayKey,
+              dateString: formatDateKey(d),
+            });
+          }
+
+          for (let i = 1; i <= lastDayOfMonth.getDate(); i++) {
+            const d = new Date(year, month, i);
+            days.push({
+              date: d,
+              isCurrentMonth: true,
+              isToday: formatDateKey(d) === todayKey,
+              dateString: formatDateKey(d),
+            });
+          }
+
+          const remainingCells = 42 - days.length;
+          for (let i = 1; i <= remainingCells; i++) {
+            const d = new Date(year, month + 1, i);
+            days.push({
+              date: d,
+              isCurrentMonth: false,
+              isToday: formatDateKey(d) === todayKey,
+              dateString: formatDateKey(d),
+            });
+          }
+          return days;
+        };
+
+        const PERSONAL_COLOR = '#1f3693'; // 宝蓝色 (Fixed)
+        // Updated to Macaron / Pastel colors
+        const FRESH_PALETTE = [
+          '#FF9AA2', '#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', 
+          '#C7CEEA', '#A0E7E5', '#FBE7C6', '#B4F8C8', '#FFAEBC',
+        ];
+
+        const getRandomFreshColor = () => FRESH_PALETTE[Math.floor(Math.random() * FRESH_PALETTE.length)];
+
+        const hexToRgba = (hex, alpha) => {
+          let c;
+          if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
+              c = hex.substring(1).split('');
+              if(c.length === 3){ c= [c[0], c[0], c[1], c[1], c[2], c[2]]; }
+              c = '0x' + c.join('');
+              return 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+','+alpha+')';
+          }
+          return hex; 
+        }
+
+        const STORAGE_KEY = 'work_calendar_tasks';
+        const NOTES_STORAGE_KEY = 'work_calendar_monthly_notes';
+
+        const loadTasks = () => {
+          try {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            return stored ? JSON.parse(stored) : [];
+          } catch (e) { return []; }
+        };
+
+        const saveTasks = (tasks) => {
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); } catch (e) {}
+        };
+
+        const loadMonthlyNotes = () => {
+          try {
+            const stored = localStorage.getItem(NOTES_STORAGE_KEY);
+            return stored ? JSON.parse(stored) : {};
+          } catch (e) { return {}; }
+        };
+
+        const saveMonthlyNotes = (notes) => {
+          try { localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(notes)); } catch (e) {}
+        };
+
+        // --- COMPONENTS ---
+
+        // Modal
+        const Modal = ({ isOpen, onClose, title, children }) => {
+          if (!isOpen) return null;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-blue-900/20 backdrop-blur-md transition-opacity duration-300" onClick={onClose} />
+              <div className="relative bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-[bounceIn_0.4s_cubic-bezier(0.175,0.885,0.32,1.275)] border-4 border-white ring-1 ring-gray-100" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-8 py-6 bg-gradient-to-r from-blue-50 to-white">
+                  <h3 className="text-2xl font-black text-blue-900 tracking-tight">{title}</h3>
+                  <button onClick={onClose} className="p-2 rounded-full bg-white hover:bg-red-50 text-gray-400 hover:text-red-500 shadow-sm hover:shadow-md transition-all active:scale-90">
+                    <XIcon size={24} strokeWidth={3} />
+                  </button>
+                </div>
+                <div className="p-8">{children}</div>
+              </div>
+            </div>
+          );
+        };
+
+        // Drawer
+        const Drawer = ({ isOpen, onClose, title, children, headerAction }) => {
+          const [visible, setVisible] = useState(false);
+          useEffect(() => {
+            if (isOpen) {
+              setVisible(true);
+              document.body.style.overflow = 'hidden';
+            } else {
+              const timer = setTimeout(() => setVisible(false), 300);
+              document.body.style.overflow = '';
+              return () => clearTimeout(timer);
+            }
+          }, [isOpen]);
+
+          if (!visible && !isOpen) return null;
+
+          return (
+            <div className="fixed inset-0 z-50 flex justify-end">
+              <div className={`absolute inset-0 bg-blue-900/20 backdrop-blur-sm transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0'}`} onClick={onClose} />
+              <div 
+                className={`
+                  relative w-full max-w-md h-full bg-white shadow-2xl flex flex-col
+                  transition-transform duration-300 cubic-bezier(0.4, 0, 0.2, 1)
+                  rounded-l-[2.5rem] overflow-hidden border-l-4 border-blue-50
+                  ${isOpen ? 'translate-x-0' : 'translate-x-full'}
+                `}
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex-none flex items-center justify-between px-6 sm:px-8 py-5 bg-gradient-to-r from-blue-50/80 to-white backdrop-blur-md border-b border-blue-50 z-10 pt-10 sm:pt-6">
+                  <h3 className="text-xl sm:text-2xl font-black text-blue-900 tracking-tight flex items-center gap-2">{title}</h3>
+                  <div className="flex items-center gap-2">
+                    {headerAction}
+                    <button onClick={onClose} className="p-2.5 rounded-full bg-white hover:bg-red-50 text-gray-400 hover:text-red-500 shadow-sm hover:shadow-md transition-all active:scale-90 border border-gray-100">
+                      <XIcon size={20} strokeWidth={3} />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto task-scroll p-6 sm:p-8">
+                  {children}
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // TaskForm
+        const TaskForm = ({ initialDate, existingTask, initialColor, onSave, onDelete, onBack }) => {
+          const [title, setTitle] = useState('');
+          const [description, setDescription] = useState('');
+          const [color, setColor] = useState(PERSONAL_COLOR);
+          const [copyFeedback, setCopyFeedback] = useState(false);
+
+          useEffect(() => {
+            if (existingTask) {
+              setTitle(existingTask.title);
+              setDescription(existingTask.description);
+              setColor(existingTask.color || PERSONAL_COLOR);
+            } else {
+              setTitle('');
+              setDescription('');
+              if (initialColor) setColor(initialColor);
+            }
+            setCopyFeedback(false);
+          }, [existingTask, initialColor]);
+
+          const handleSubmit = (e) => {
+            e.preventDefault();
+            if (!title.trim()) return;
+            onSave({
+              id: existingTask ? existingTask.id : crypto.randomUUID(),
+              date: initialDate,
+              title: title.trim(),
+              description: description.trim(),
+              completed: existingTask ? existingTask.completed : false,
+              color: color,
+            });
+          };
+
+          const handleCopyToNextMonth = () => {
+            if (!title.trim()) return;
+            const current = new Date(initialDate);
+            const targetDate = new Date(current.getFullYear(), current.getMonth() + 1, current.getDate());
+            if (targetDate.getDate() !== current.getDate()) { targetDate.setDate(0); }
+            const nextMonthStr = formatDateKey(targetDate);
+
+            onSave({
+              id: crypto.randomUUID(),
+              date: nextMonthStr,
+              title: title.trim(),
+              description: description.trim(),
+              completed: false,
+              color: color,
+            });
+            setCopyFeedback(true);
+            setTimeout(() => setCopyFeedback(false), 2000);
+          };
+
+          return (
+            <form onSubmit={handleSubmit} className="h-full flex flex-col min-h-full pb-20">
+              <div className="flex items-center justify-between mb-2 flex-none">
+                 <button type="button" onClick={onBack} className="flex items-center text-gray-500 hover:text-blue-600 font-bold transition-colors text-sm px-3 py-1.5 rounded-xl hover:bg-blue-50">
+                   <ArrowLeft size={16} className="mr-1" /> 返回列表
+                 </button>
+                 <div className="flex items-center space-x-2 text-sm text-blue-600 font-bold bg-blue-50 px-4 py-2 rounded-full">
+                    <CalendarIcon size={16} /><span>{initialDate}</span>
+                 </div>
+              </div>
+
+              <div className="space-y-2 flex-none">
+                <label className="block text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">任务标题</label>
+                <div className="relative">
+                  <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：买生日蛋糕 🎂" className="w-full pl-5 pr-12 py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl focus:bg-white focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all font-bold text-gray-800 placeholder-gray-400 text-lg" autoFocus />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-white shadow-sm" style={{ backgroundColor: color }} />
+                </div>
+              </div>
+
+              <div className="space-y-2 flex-1 mt-6">
+                <label className="block text-sm font-bold text-gray-500 uppercase tracking-wider ml-1">详细内容</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="写下具体的执行步骤..." className="w-full h-full min-h-[120px] px-5 py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl focus:bg-white focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all resize-none font-medium text-gray-700 placeholder-gray-400 leading-relaxed" />
+              </div>
+
+              <div className="space-y-3 pt-4 border-t border-gray-100 flex-none mt-4">
+                {title.trim() && (
+                  <button type="button" onClick={handleCopyToNextMonth} className={`w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl transition-all font-bold border-2 ${copyFeedback ? 'bg-green-50 border-green-200 text-green-600' : 'bg-white border-blue-100 text-blue-500 hover:bg-blue-50 hover:border-blue-200'}`}>
+                    {copyFeedback ? <><span>✅ 已复制到下个月</span></> : <><Copy size={18} /><span>复制该任务到下个月</span></>}
+                  </button>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  {existingTask ? (
+                    <button type="button" onClick={() => window.confirm('确定要删除这个任务吗？') && onDelete(existingTask.id)} className="px-4 py-3 text-red-400 bg-red-50 hover:bg-red-100 hover:text-red-500 rounded-2xl transition-colors font-bold text-sm" title="删除任务">
+                      <Trash2 size={20} />
+                    </button>
+                  ) : <div />}
+                  <div className="flex space-x-3 flex-1 justify-end">
+                      <button type="button" onClick={onBack} className="px-6 py-3 text-gray-500 hover:bg-gray-100 rounded-2xl transition-colors font-bold">取消</button>
+                      <button type="submit" className="flex items-center justify-center space-x-2 px-8 py-3 text-white rounded-2xl shadow-xl transition-all transform hover:scale-105 active:scale-95 font-bold flex-1 sm:flex-none" style={{ backgroundColor: color, boxShadow: `0 10px 15px -3px ${color}40` }}>
+                          <Save size={20} /><span>保存</span>
+                      </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          );
+        };
+
+        // --- CLOUD SYNC COMPONENT (Manual Import/Export) ---
+        const CloudSyncPanel = ({ tasks, monthlyNotes, onImport, onBack }) => {
+          const [importData, setImportData] = useState('');
+          const [copySuccess, setCopySuccess] = useState(false);
+          const [errorMsg, setErrorMsg] = useState('');
+
+          const handleExport = () => {
+            const data = {
+              tasks,
+              monthlyNotes,
+              timestamp: new Date().toISOString(),
+              version: '1.0'
+            };
+            const jsonString = JSON.stringify(data);
+            navigator.clipboard.writeText(jsonString).then(() => {
+              setCopySuccess(true);
+              setTimeout(() => setCopySuccess(false), 2500);
+            });
+          };
+
+          const handleImport = () => {
+            setErrorMsg('');
+            try {
+              if (!importData.trim()) return;
+              const data = JSON.parse(importData);
+              if (!data.tasks || !Array.isArray(data.tasks)) {
+                throw new Error("数据格式不对哦，是不是复制错了？");
+              }
+              if (window.confirm('⚠️ 警告：导入数据将【覆盖】当前所有任务！确定要执行吗？')) {
+                onImport(data);
+              }
+            } catch (e) {
+              setErrorMsg(e.message || "无法解析数据");
+            }
+          };
+
+          return (
+            <div className="h-full flex flex-col gap-6">
+              <div className="bg-blue-50 rounded-2xl p-4 text-blue-900 text-sm font-medium leading-relaxed border-2 border-blue-100">
+                <p>💡 <b>小贴士：</b> 本日历暂无后台服务器。</p>
+                <p className="mt-1">要在不同设备（如电脑 ➡ 手机）间同步数据，请使用下方的“导出/导入”功能手动搬运数据。</p>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-bold text-gray-700 flex items-center gap-2"><Upload size={18} /> 导出数据 (本机 ➡ 其他)</h4>
+                <button onClick={handleExport} className={`w-full py-4 rounded-2xl font-bold border-2 transition-all flex items-center justify-center gap-2 shadow-sm ${copySuccess ? 'bg-green-50 border-green-200 text-green-600' : 'bg-white border-blue-200 text-blue-600 hover:bg-blue-50'}`}>
+                  {copySuccess ? <><ClipboardCheck size={20} /><span>已复制！快去另一台设备粘贴</span></> : <><Copy size={20} /><span>复制所有数据 (生成暗号)</span></>}
+                </button>
+              </div>
+
+              <div className="space-y-2 flex-1 flex flex-col">
+                <h4 className="font-bold text-gray-700 flex items-center gap-2"><Download size={18} /> 导入数据 (其他 ➡ 本机)</h4>
+                <textarea 
+                  value={importData}
+                  onChange={(e) => setImportData(e.target.value)}
+                  placeholder="在此处粘贴“数据暗号”..."
+                  className="w-full flex-1 p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100 outline-none resize-none font-mono text-xs text-gray-600"
+                />
+                {errorMsg && <p className="text-red-500 text-xs font-bold px-2">{errorMsg}</p>}
+                <button 
+                  onClick={handleImport} 
+                  disabled={!importData.trim()}
+                  className="w-full py-4 mt-2 bg-slate-800 text-white rounded-2xl font-bold shadow-lg hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                >
+                  确认覆盖并同步
+                </button>
+              </div>
+              
+              <button onClick={onBack} className="text-gray-400 text-sm font-bold hover:text-blue-500 transition-colors py-2">
+                 ← 返回任务列表
+              </button>
+            </div>
+          );
+        };
+
+        const App = () => {
+          const [currentDate, setCurrentDate] = useState(new Date());
+          const [tasks, setTasks] = useState([]);
+          const [monthlyNotes, setMonthlyNotes] = useState({});
+          const [modalType, setModalType] = useState(ModalType.NONE); 
+          const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+          const [selectedDateKey, setSelectedDateKey] = useState('');
+          const [drawerMode, setDrawerMode] = useState('list'); // 'list' | 'form' | 'sync'
+          const [editingTask, setEditingTask] = useState(null);
+          const [initialTaskColor, setInitialTaskColor] = useState(PERSONAL_COLOR); 
+          const [isSelectionMode, setIsSelectionMode] = useState(false);
+          const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
+          const [copyMonthsCount, setCopyMonthsCount] = useState(1);
+          const [showBatchSuccess, setShowBatchSuccess] = useState(false);
+
+          useEffect(() => {
+            const loadedTasks = loadTasks();
+            setTasks(loadedTasks);
+            setMonthlyNotes(loadMonthlyNotes());
+            const todayStr = formatDateKey(new Date());
+            if (loadedTasks.some(t => t.date === todayStr && !t.completed)) {
+              setModalType(ModalType.REMINDER);
+            }
+          }, []); 
+
+          useEffect(() => { saveTasks(tasks); }, [tasks]);
+          useEffect(() => {
+            if (!isDrawerOpen) {
+              setIsSelectionMode(false);
+              setSelectedTaskIds(new Set());
+              setCopyMonthsCount(1);
+              if (drawerMode === 'sync') setDrawerMode('list'); // Reset sync mode on close
+            }
+          }, [isDrawerOpen, selectedDateKey]);
+
+          const calendarGrid = useMemo(() => generateCalendarGrid(currentDate), [currentDate]);
+          const currentMonthKey = getMonthKey(currentDate);
+
+          const handleDayClick = (dateStr) => {
+            setSelectedDateKey(dateStr);
+            setDrawerMode('list'); 
+            setIsDrawerOpen(true);
+          };
+
+          const handleCalendarTaskClick = (e, task) => {
+            e.stopPropagation(); 
+            setSelectedDateKey(task.date);
+            setEditingTask(task);
+            setDrawerMode('form');
+            setIsDrawerOpen(true);
+          };
+
+          const toggleTaskCompletion = (e, taskId) => {
+            e.stopPropagation(); 
+            setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t));
+          };
+
+          const handleAddNewWorkTask = () => {
+            setEditingTask(null);
+            setInitialTaskColor(getRandomFreshColor());
+            setDrawerMode('form');
+          };
+
+          const handleAddNewPersonalTask = () => {
+            setEditingTask(null);
+            setInitialTaskColor(PERSONAL_COLOR);
+            setDrawerMode('form');
+          };
+
+          const handleBatchCopy = () => {
+            if (selectedTaskIds.size === 0) return;
+            const tasksToCopy = tasks.filter(t => selectedTaskIds.has(t.id));
+            const newTasks = [];
+            tasksToCopy.forEach(task => {
+              for (let i = 1; i <= copyMonthsCount; i++) {
+                newTasks.push({
+                  id: crypto.randomUUID(),
+                  date: addMonthsToDate(task.date, i),
+                  title: task.title,
+                  description: task.description,
+                  completed: false, 
+                  color: task.color,
+                });
+              }
+            });
+            setTasks(prev => [...prev, ...newTasks]);
+            setShowBatchSuccess(true);
+            setTimeout(() => {
+              setShowBatchSuccess(false);
+              setIsSelectionMode(false);
+              setSelectedTaskIds(new Set());
+            }, 1500);
+          };
+
+          const saveTask = (task) => {
+            setTasks(prev => {
+              if (prev.some(t => t.id === task.id)) {
+                return prev.map(t => t.id === task.id ? task : t);
+              }
+              return [...prev, task];
+            });
+            if (task.date === selectedDateKey) setDrawerMode('list');
+          };
+
+          const deleteTask = (id) => {
+            setTasks(prev => prev.filter(t => t.id !== id));
+            setDrawerMode('list');
+          };
+          
+          const handleFullImport = (data) => {
+             if (data.tasks) setTasks(data.tasks);
+             if (data.monthlyNotes) {
+                setMonthlyNotes(data.monthlyNotes);
+                saveMonthlyNotes(data.monthlyNotes);
+             }
+             alert('🎉 数据同步成功！');
+             setDrawerMode('list');
+          };
+
+          const handleNoteChange = (e) => {
+            const newNotes = { ...monthlyNotes, [currentMonthKey]: e.target.value };
+            setMonthlyNotes(newNotes);
+            saveMonthlyNotes(newNotes);
+          };
+
+          const selectedDateTasks = useMemo(() => 
+            tasks.filter(t => t.date === selectedDateKey).sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
+          , [tasks, selectedDateKey]);
+
+          const toggleTaskSelection = (taskId) => {
+            const newSet = new Set(selectedTaskIds);
+            if (newSet.has(taskId)) newSet.delete(taskId);
+            else newSet.add(taskId);
+            setSelectedTaskIds(newSet);
+          };
+
+          const toggleSelectionMode = () => {
+             setIsSelectionMode(!isSelectionMode);
+             setSelectedTaskIds(new Set());
+             setCopyMonthsCount(1);
+          };
+          
+          // Drawer Title Logic
+          let drawerTitle = '📅 任务列表';
+          if (drawerMode === 'form') drawerTitle = editingTask ? '📝 修改记录' : '✨ 写新任务';
+          if (drawerMode === 'sync') drawerTitle = '☁️ 数据同步中心';
+
+          return (
+            <div className="min-h-screen pb-12 pt-6 px-4 sm:px-8 flex flex-col items-center relative overflow-hidden text-slate-800">
+              {/* Background Stickers */}
+              <Sticker icon={Crown} className="top-10 left-10 text-blue-300 rotate-[-12deg]" />
+              <Sticker icon={Heart} className="top-40 right-10 text-pink-400 rotate-[12deg]" />
+              <Sticker icon={Star} className="bottom-20 left-20 text-yellow-300 rotate-[45deg]" />
+              <Sticker icon={Zap} className="bottom-40 right-40 text-blue-200 -rotate-[12deg]" />
+              <Sticker icon={Music} className="top-32 left-1/4 text-purple-200 rotate-[20deg]" />
+
+              {/* Header */}
+              <div className="w-full max-w-6xl bg-white/90 backdrop-blur-md rounded-[2.5rem] shadow-xl shadow-blue-100 border-4 border-white p-4 mb-8 flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0 relative z-10">
+                <div className="flex items-center space-x-4 pl-2">
+                  <div className="p-4 bg-gradient-to-tr from-blue-600 to-cyan-400 rounded-2xl text-white shadow-lg shadow-blue-200 rotate-3 border-2 border-white">
+                    <Crown size={28} strokeWidth={2.5} />
+                  </div>
+                  <div>
+                    <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                      日历小本本 <Heart size={20} className="text-pink-500 fill-pink-500 animate-bounce" />
+                    </h1>
+                    <p className="text-sm text-blue-400 font-bold tracking-wider">AOE's Calendar</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center bg-blue-50 rounded-full p-2 shadow-inner border-2 border-blue-100">
+                  <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-3 hover:bg-white hover:text-blue-600 hover:shadow-md rounded-full transition-all text-gray-400 active:scale-90">
+                    <ChevronLeft size={24} strokeWidth={3} />
+                  </button>
+                  <div className="px-8 font-black text-2xl text-blue-900 min-w-[180px] text-center tracking-wide font-mono">
+                    {currentDate.getFullYear()}.{String(currentDate.getMonth() + 1).padStart(2, '0')}
+                  </div>
+                  <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-3 hover:bg-white hover:text-blue-600 hover:shadow-md rounded-full transition-all text-gray-400 active:scale-90">
+                    <ChevronRight size={24} strokeWidth={3} />
+                  </button>
+                </div>
+
+                <button onClick={() => setCurrentDate(new Date())} className="px-6 py-3 bg-slate-900 text-white font-bold rounded-2xl hover:bg-black transition-all border-4 border-gray-200 hover:border-blue-200 shadow-lg active:scale-95 flex items-center gap-2">
+                  <Sparkles size={16} className="text-yellow-300" /> 回到今天
+                </button>
+              </div>
+
+              {/* Grid */}
+              <div className="w-full max-w-6xl relative z-10 mb-8">
+                <div className="grid grid-cols-7 mb-4 px-2">
+                  {['周日', '周一', '周二', '周三', '周四', '周五', '周六'].map((day, i) => (
+                    <div key={day} className="text-center">
+                      <span className={`inline-block px-4 py-2 rounded-2xl text-sm font-black tracking-wide shadow-sm border-2 ${i === 0 || i === 6 ? 'bg-pink-50 text-pink-500 border-pink-100' : 'bg-white text-gray-500 border-white'}`}>
+                        {day}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-2 sm:gap-4 auto-rows-fr">
+                  {calendarGrid.map((day, idx) => {
+                    const dayTasks = tasks.filter(t => t.date === day.dateString).sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
+                    const isToday = day.isToday;
+                    return (
+                      <div key={idx} onClick={() => handleDayClick(day.dateString)} className={`min-h-[140px] rounded-[1.5rem] p-2 transition-all cursor-pointer relative group flex flex-col gap-1.5 border-[3px] ${!day.isCurrentMonth ? 'bg-white/30 border-transparent text-gray-300 hover:bg-white/50' : 'bg-white border-white hover:border-blue-300 hover:shadow-xl hover:shadow-blue-100/50 hover:-translate-y-1 shadow-sm'} ${isToday ? 'ring-4 ring-blue-200 border-blue-400 bg-blue-50' : ''}`}>
+                        <div className="flex justify-between items-start mb-1 px-1">
+                          <span className={`w-8 h-8 flex items-center justify-center rounded-full text-lg font-black transition-transform group-hover:scale-110 ${isToday ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-700'}`}>{day.date.getDate()}</span>
+                          <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 opacity-0 group-hover:opacity-100 transition-all transform scale-50 group-hover:scale-100 border-2 border-blue-200"><Plus size={16} strokeWidth={3} /></div>
+                        </div>
+                        <div className="flex flex-col gap-1.5 overflow-hidden w-full">
+                          {dayTasks.map(task => {
+                            const taskColor = task.color || PERSONAL_COLOR;
+                            return (
+                              <div key={task.id} onClick={(e) => handleCalendarTaskClick(e, task)} style={!task.completed ? { backgroundColor: hexToRgba(taskColor, 0.1), borderColor: hexToRgba(taskColor, 0.3), color: taskColor } : undefined} className={`relative px-2 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 group/task transition-all border-2 ${task.completed ? 'bg-gray-50 text-gray-400 border-transparent line-through decoration-2 decoration-gray-300' : 'hover:opacity-80 hover:scale-[1.02]'}`}>
+                                <button onClick={(e) => toggleTaskCompletion(e, task.id)} className={`shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center check-anim ${task.completed ? 'bg-gray-300 border-gray-300 text-white' : 'bg-white border-current text-transparent'}`}>
+                                   {task.completed && <CheckCircle2 size={12} strokeWidth={4} />}
+                                </button>
+                                <span className="truncate flex-1">{task.title}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              {/* Monthly Note */}
+              <div className="w-full max-w-6xl relative z-10 mb-12">
+                <div className="relative bg-[#fffbeb] p-8 rounded-[2rem] shadow-xl shadow-yellow-100/50 border-4 border-white rotate-1 transform transition-transform hover:rotate-0 group">
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-4 w-32 h-8 bg-yellow-200/50 rounded-sm transform rotate-1 shadow-sm"></div>
+                  <div className="flex items-center gap-3 mb-4 text-yellow-700">
+                     <div className="p-2 bg-yellow-300 rounded-xl text-white transform -rotate-6 shadow-md"><StickyNote size={24} strokeWidth={3} /></div>
+                     <h3 className="text-xl font-black tracking-tight">{currentDate.getFullYear()}年{currentDate.getMonth() + 1}月 · 备忘录 Memo</h3>
+                  </div>
+                  <textarea value={monthlyNotes[currentMonthKey] || ''} onChange={handleNoteChange} placeholder="在此记录本月的重点目标、心情或任何琐事..." className="w-full h-40 bg-transparent border-none outline-none text-yellow-900/80 font-medium text-lg leading-relaxed resize-none placeholder-yellow-900/30" style={{ backgroundImage: 'linear-gradient(transparent 31px, #fde68a 32px)', backgroundSize: '100% 32px', lineHeight: '32px' }} />
+                </div>
+              </div>
+
+              {/* Drawer Content */}
+              <Drawer 
+                isOpen={isDrawerOpen} 
+                onClose={() => setIsDrawerOpen(false)} 
+                title={drawerTitle}
+                headerAction={
+                   drawerMode === 'list' ? (
+                     <button onClick={() => setDrawerMode('sync')} className="p-2 text-blue-400 hover:text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors" title="数据同步与备份">
+                       <CloudCog size={20} strokeWidth={2.5} />
+                     </button>
+                   ) : null
+                }
+              >
+                {drawerMode === 'sync' ? (
+                  <CloudSyncPanel tasks={tasks} monthlyNotes={monthlyNotes} onImport={handleFullImport} onBack={() => setDrawerMode('list')} />
+                ) : drawerMode === 'list' ? (
+                  <div className="flex flex-col min-h-full relative">
+                     <div className="mb-6 flex items-center justify-between flex-none">
+                        <div className="text-gray-500 font-bold text-lg flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-blue-500"></div>{selectedDateKey}
+                        </div>
+                        <button onClick={toggleSelectionMode} className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all border-2 ${isSelectionMode ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+                          <Layers size={14} />{isSelectionMode ? '取消多选' : '多选任务'}
+                        </button>
+                     </div>
+                     
+                     <div className="flex-1 space-y-4 mb-6">
+                       {selectedDateTasks.length === 0 ? (
+                         <div className="h-48 flex flex-col items-center justify-center text-gray-400 border-4 border-dotted border-gray-200 rounded-[2rem] bg-gray-50/50">
+                            <p className="font-bold">今天超闲的！</p>
+                         </div>
+                       ) : (
+                         selectedDateTasks.map(task => {
+                           const isSelected = selectedTaskIds.has(task.id);
+                           const taskColor = task.color || PERSONAL_COLOR;
+                           return (
+                           <div key={task.id} onClick={() => isSelectionMode && toggleTaskSelection(task.id)} className={`p-4 border-2 rounded-3xl shadow-sm transition-all group flex gap-3 items-start relative overflow-hidden ${isSelectionMode ? (isSelected ? 'bg-blue-50 border-blue-400 cursor-pointer scale-[1.02]' : 'bg-white border-gray-100 cursor-pointer opacity-80 hover:opacity-100') : (task.completed ? 'bg-gray-50 border-gray-100 opacity-75' : 'bg-white border-blue-100 hover:border-blue-400 hover:shadow-lg')}`}>
+                             {!task.completed && !isSelectionMode && <div className="absolute top-0 left-0 w-2 h-full" style={{ backgroundColor: taskColor }}></div>}
+                             {isSelectionMode && isSelected && <div className="absolute top-0 right-0 p-2 bg-blue-500 rounded-bl-2xl"><Check size={14} className="text-white" strokeWidth={4} /></div>}
+                             {!isSelectionMode && (
+                               <button onClick={(e) => toggleTaskCompletion(e, task.id)} className={`mt-1 w-6 h-6 rounded-full border-[3px] flex items-center justify-center shrink-0 transition-all check-anim ml-2 ${task.completed ? 'bg-green-400 border-green-400 text-white shadow-sm' : 'bg-white border-gray-300 hover:border-blue-400 text-transparent'}`}>
+                                 <CheckCircle2 size={16} strokeWidth={4} />
+                               </button>
+                             )}
+                             <div className="flex-1 cursor-pointer pl-1" onClick={() => !isSelectionMode && (setEditingTask(task) || setDrawerMode('form'))}>
+                               <div className="flex items-start justify-between mb-1">
+                                 <h4 className={`font-black text-lg transition-all ${task.completed && !isSelectionMode ? 'text-gray-400 line-through decoration-2 decoration-gray-300' : ''}`} style={!task.completed && !isSelectionMode ? { color: taskColor } : {}}>{task.title}</h4>
+                                 {!isSelectionMode && <div className="opacity-0 group-hover:opacity-100 p-1.5 bg-gray-100 rounded-full text-gray-500 hover:bg-blue-500 hover:text-white transition-all"><Pencil size={14} /></div>}
+                               </div>
+                               <p className={`text-sm font-medium line-clamp-2 ${task.completed && !isSelectionMode ? 'text-gray-300' : 'text-gray-500'}`}>{task.description || '无详细内容...'}</p>
+                             </div>
+                           </div>
+                         )})
+                       )}
+                     </div>
+
+                     {/* Action Buttons */}
+                     <div className="flex-none mt-auto">
+                       {isSelectionMode ? (
+                         <div className="space-y-3 animate-[slideUp_0.3s_ease-out] bg-white border border-gray-100 p-4 rounded-3xl shadow-lg">
+                           {showBatchSuccess ? (
+                             <div className="bg-green-100 text-green-700 p-4 rounded-2xl text-center font-bold flex items-center justify-center gap-2"><CheckCircle2 /><span>成功复制到未来！</span></div>
+                           ) : (
+                             <>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm font-bold text-gray-500">已选 {selectedTaskIds.size} 项</span>
+                                  <div className="flex items-center gap-2">
+                                     <label className="text-sm font-bold text-blue-900">复制到未来</label>
+                                     <input type="number" min="1" max="12" value={copyMonthsCount} onChange={(e) => setCopyMonthsCount(Math.max(1, parseInt(e.target.value) || 1))} className="w-16 p-1 text-center font-bold border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500" />
+                                     <span className="text-sm font-bold text-gray-500">个月</span>
+                                  </div>
+                                </div>
+                                <button onClick={handleBatchCopy} disabled={selectedTaskIds.size === 0} className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 shadow-xl shadow-blue-200 hover:shadow-2xl transition-all active:scale-95 flex items-center justify-center gap-2 disabled:bg-gray-300 disabled:shadow-none disabled:cursor-not-allowed">
+                                  <Copy size={20} strokeWidth={3} /><span>开始复制</span>
+                                </button>
+                             </>
+                           )}
+                         </div>
+                       ) : (
+                         <div className="flex flex-col gap-3">
+                           <button onClick={handleAddNewPersonalTask} className="w-full py-3.5 bg-blue-900 text-white font-bold rounded-2xl hover:bg-black shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2" style={{ backgroundColor: PERSONAL_COLOR }}>
+                             <User size={20} strokeWidth={2.5} /><span>AOE</span>
+                           </button>
+                           <button onClick={handleAddNewWorkTask} className="w-full py-3.5 bg-white text-slate-700 font-bold rounded-2xl hover:bg-gray-50 shadow-lg border-2 border-gray-100 transition-all active:scale-95 flex items-center justify-center gap-2">
+                             <Briefcase size={20} className="text-orange-400" strokeWidth={2.5} /><span>打工</span>
+                           </button>
+                         </div>
+                       )}
+                     </div>
+                  </div>
+                ) : (
+                  <TaskForm initialDate={selectedDateKey} existingTask={editingTask} initialColor={initialTaskColor} onSave={saveTask} onDelete={deleteTask} onBack={() => setDrawerMode('list')} />
+                )}
+              </Drawer>
+
+              {/* Reminder Modal */}
+              <Modal isOpen={modalType === ModalType.REMINDER} onClose={() => setModalType(ModalType.NONE)} title="👿 今日任务通缉令">
+                <div className="space-y-5">
+                  <div className="flex items-center space-x-3 bg-blue-50 p-4 rounded-2xl border-2 border-blue-200 text-blue-900">
+                     <Crown className="shrink-0 text-blue-600 fill-blue-200" /><div className="flex flex-col"><span className="text-xs font-black text-blue-400 uppercase tracking-wider">Mission Start</span><span className="text-sm font-bold">{formatDateKey(new Date())} 还没做完的事</span></div>
+                  </div>
+                  <div className="max-h-[300px] overflow-y-auto task-scroll space-y-3 pr-2">
+                    {tasks.filter(t => t.date === formatDateKey(new Date()) && !t.completed).map(task => (
+                        <div key={task.id} className="p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-blue-300 transition-colors shadow-sm group">
+                          <h4 className="font-bold text-gray-800 mb-2 flex items-center text-lg"><Circle size={20} className="text-blue-300 mr-2" />{task.title}</h4>
+                          <div className="bg-gray-50 rounded-xl p-3 text-sm text-gray-600 leading-relaxed whitespace-pre-wrap font-medium">{task.description || '无详细描述'}</div>
+                        </div>
+                    ))}
+                  </div>
+                  <div className="pt-2">
+                    <button onClick={() => setModalType(ModalType.NONE)} className="w-full py-3.5 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 active:scale-95 flex items-center justify-center gap-2"><CheckCircle2 size={20} /> 本宫知道了</button>
+                  </div>
+                </div>
+              </Modal>
+
+              <div className="mt-8 text-center relative z-10 pb-4">
+                <p className="text-blue-400 text-xs font-bold tracking-widest uppercase bg-white/60 inline-block px-4 py-1.5 rounded-full backdrop-blur-sm shadow-sm border border-white">✨ Auto Saved with Magic ✨</p>
+              </div>
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "name": "WorkCalendar",
+  "description": "A modern, persistent monthly work calendar with task management and daily reminders.",
+  "requestFramePermissions": []
+}
