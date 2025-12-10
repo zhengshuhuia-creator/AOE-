@@ -72,11 +72,16 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({ onLoginSuc
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        setMessage('注册确认邮件已发送！请查收邮件点击链接登录。');
+        setMessage('✅ 注册确认邮件已发送！请查收邮件点击链接登录。');
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        onLoginSuccess();
+        
+        setMessage('✅ 登录成功！正在跳转...');
+        // Wait 1s for better UX before closing modal
+        setTimeout(() => {
+           onLoginSuccess();
+        }, 1000);
       }
     } catch (err: any) {
       setError(err.message || '认证失败，请检查账号密码');

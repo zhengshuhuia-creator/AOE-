@@ -140,44 +140,58 @@ const App: React.FC = () => {
     setTasks(loadedTasks);
     setMonthlyNotes(loadMonthlyNotes());
 
-    // 2. Check Supabase
+    // 2. Setup Supabase
     const supabase = getSupabase();
     if (supabase) {
+      // Check initial session
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
           setUserEmail(session.user.email || 'User');
           refreshFromSupabase();
-          
-          // Setup Realtime Subscription
-          const channel = supabase
-            .channel('public:data')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
-               if (payload.eventType === 'INSERT') {
-                 setTasks(prev => {
-                    if (prev.some(t => t.id === payload.new.id)) return prev;
-                    return [...prev, payload.new as Task]
-                 });
-               } else if (payload.eventType === 'UPDATE') {
-                 setTasks(prev => prev.map(t => t.id === payload.new.id ? (payload.new as Task) : t));
-               } else if (payload.eventType === 'DELETE') {
-                 setTasks(prev => prev.filter(t => t.id !== payload.old.id));
-               }
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'monthly_notes' }, () => {
-              // Refresh notes on change (simplified for notes)
-              supabase.from('monthly_notes').select('month_key, content').then(({ data }) => {
-                 if(data) {
-                    const notesObj: Record<string, string> = {};
-                    data.forEach((n: any) => notesObj[n.month_key] = n.content);
-                    setMonthlyNotes(notesObj);
-                 }
-              });
-            })
-            .subscribe();
-
-          return () => { supabase.removeChannel(channel); };
         }
       });
+
+      // Listen for Auth Changes (Login/Logout)
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+          setUserEmail(session.user.email || 'User');
+          refreshFromSupabase();
+        } else if (event === 'SIGNED_OUT') {
+          setUserEmail(null);
+          setTasks(loadTasks()); // Revert to local storage on logout
+        }
+      });
+
+      // Setup Realtime Subscription
+      const channel = supabase
+        .channel('public:data')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
+           if (payload.eventType === 'INSERT') {
+             setTasks(prev => {
+                if (prev.some(t => t.id === payload.new.id)) return prev;
+                return [...prev, payload.new as Task]
+             });
+           } else if (payload.eventType === 'UPDATE') {
+             setTasks(prev => prev.map(t => t.id === payload.new.id ? (payload.new as Task) : t));
+           } else if (payload.eventType === 'DELETE') {
+             setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+           }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'monthly_notes' }, () => {
+          supabase.from('monthly_notes').select('month_key, content').then(({ data }) => {
+             if(data) {
+                const notesObj: Record<string, string> = {};
+                data.forEach((n: any) => notesObj[n.month_key] = n.content);
+                setMonthlyNotes(notesObj);
+             }
+          });
+        })
+        .subscribe();
+
+      return () => { 
+        subscription.unsubscribe();
+        supabase.removeChannel(channel); 
+      };
     }
 
     // Daily Reminder check
@@ -297,7 +311,6 @@ const App: React.FC = () => {
     const supabase = getSupabase();
     if (userEmail && supabase) {
         // Simple timeout to avoid too many requests
-        // A better way is a dedicated debounce hook, but we use a simple inline strategy here
         supabase.auth.getUser().then(({ data: { user } }) => {
             if (user) {
                 supabase.from('monthly_notes').upsert({
@@ -372,8 +385,7 @@ const App: React.FC = () => {
           color: task.color,
         };
         newTasks.push(copy);
-        // If synced, save individually or use bulk insert? Bulk insert better.
-        saveTask(copy); // Re-use saveTask for simplicity (triggers N requests, but it's safe)
+        saveTask(copy); 
       }
     });
     
@@ -436,27 +448,94 @@ const App: React.FC = () => {
   };
 
   const handleImportClick = () => { fileInputRef.current?.click(); };
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    // Reset input so user can select same file again if needed
+    if (event.target) event.target.value = '';
+
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
         try {
             const result = e.target?.result as string;
+            if (!result) return;
+            
             const importedData = JSON.parse(result);
+
             if (importedData.tasks && Array.isArray(importedData.tasks)) {
-                if (window.confirm(`准备导入备份数据：\n\n包含 ${importedData.tasks.length} 个任务\n\n这将覆盖当前的数据，确定要继续吗？`)) {
-                    setTasks(importedData.tasks);
-                    if (importedData.monthlyNotes) {
-                        setMonthlyNotes(importedData.monthlyNotes);
-                        saveMonthlyNotes(importedData.monthlyNotes);
-                    }
-                    saveTasks(importedData.tasks);
+                if (window.confirm(`准备导入备份数据：\n\n包含 ${importedData.tasks.length} 个任务\n\n确定要继续吗？`)) {
                     
-                    if (userEmail) {
-                      alert("注意：导入的数据已保存到本地。请手动刷新或编辑任务以触发同步。");
+                    const supabase = getSupabase();
+                    
+                    // --- 1. Check Login Status ---
+                    let currentUser = null;
+                    if (supabase) {
+                       const { data } = await supabase.auth.getUser();
+                       currentUser = data.user;
+                    }
+
+                    if (currentUser && supabase) {
+                       // --- CLOUD IMPORT MODE (Inject user_id) ---
+                       setIsSyncing(true);
+                       try {
+                          console.log("Start Cloud Import for user:", currentUser.id);
+
+                          // 2. Prepare Tasks: Force user_id injection
+                          const tasksToUpload = importedData.tasks.map((t: any) => ({
+                             id: t.id || crypto.randomUUID(),
+                             date: t.date,
+                             title: t.title,
+                             description: t.description || '',
+                             completed: !!t.completed,
+                             color: t.color || PERSONAL_COLOR,
+                             user_id: currentUser.id // CRITICAL: FORCE USER ID
+                          }));
+                          
+                          // 3. Prepare Notes: Convert to array & inject user_id
+                          const notesToUpload: any[] = [];
+                          if (importedData.monthlyNotes) {
+                             Object.entries(importedData.monthlyNotes).forEach(([key, content]) => {
+                                notesToUpload.push({
+                                   month_key: key,
+                                   content: content,
+                                   user_id: currentUser.id // CRITICAL: FORCE USER ID
+                                });
+                             });
+                          }
+
+                          // 4. Batch Upsert Tasks
+                          const { error: taskError } = await supabase.from('tasks').upsert(tasksToUpload);
+                          if (taskError) throw new Error(`Tasks Upload Error: ${taskError.message}`);
+
+                          // 5. Batch Upsert Notes
+                          if (notesToUpload.length > 0) {
+                             const { error: noteError } = await supabase.from('monthly_notes').upsert(notesToUpload, { onConflict: 'user_id, month_key' });
+                             if (noteError) throw new Error(`Notes Upload Error: ${noteError.message}`);
+                          }
+
+                          // 6. Immediate Refresh
+                          await refreshFromSupabase();
+                          
+                          alert(`✅ 数据已成功上传到云端！\n共同步了 ${tasksToUpload.length} 个任务。`);
+
+                       } catch (err: any) {
+                          console.error("Cloud import failed", err);
+                          alert(`❌ 云端上传失败: ${err.message}`);
+                       } finally {
+                          setIsSyncing(false);
+                       }
+
                     } else {
-                      alert("✅ 数据恢复成功！");
+                       // --- LOCAL ONLY MODE ---
+                       setTasks(importedData.tasks);
+                       if (importedData.monthlyNotes) {
+                           setMonthlyNotes(importedData.monthlyNotes);
+                           saveMonthlyNotes(importedData.monthlyNotes);
+                       }
+                       saveTasks(importedData.tasks);
+                       alert("✅ 本地恢复成功！\n(提示：您当前未登录，数据仅保存在此浏览器)");
                     }
                 }
             } else {
@@ -467,7 +546,6 @@ const App: React.FC = () => {
         }
     };
     reader.readAsText(file);
-    if (event.target) event.target.value = '';
   };
 
   // --- Gemini AI Features ---
@@ -1030,15 +1108,11 @@ const App: React.FC = () => {
          <SupabaseAuthModal 
             userEmail={userEmail}
             onLoginSuccess={() => {
-              // Refresh logic is handled by auth state change listener, 
-              // but we can close modal here
               setModalType(ModalType.NONE);
             }}
             onLogout={() => {
               const supabase = getSupabase();
               if(supabase) supabase.auth.signOut();
-              setUserEmail(null);
-              // Clear local state or keep it? Keep it as cache is fine.
             }}
          />
       </Modal>
