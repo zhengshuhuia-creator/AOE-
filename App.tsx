@@ -3,25 +3,17 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
-  CheckCircle2,
-  Circle,
   Sparkles,
-  Plus,
   Heart,
   Crown,
-  Zap,
-  Layers,
   Check,
-  Copy,
   Briefcase,
   User,
   StickyNote,
   Trash2,
-  ClipboardPaste,
   Download,
   Upload,
   Wand2,
-  Bot,
   Cloud,
   CloudOff,
   AlertCircle
@@ -33,7 +25,6 @@ import {
   generateCalendarGrid, 
   loadTasks, 
   saveTasks, 
-  addMonthsToDate, 
   hexToRgba, 
   getRandomFreshColor, 
   PERSONAL_COLOR,
@@ -73,16 +64,12 @@ const App: React.FC = () => {
   const [initialTaskColor, setInitialTaskColor] = useState<string>(PERSONAL_COLOR); 
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
-  const [copyMonthsCount, setCopyMonthsCount] = useState<number>(1);
-  const [showBatchSuccess, setShowBatchSuccess] = useState(false);
-  const [clipboardTask, setClipboardTask] = useState<Task | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // 刷新云端数据
   const refreshFromSupabase = async () => {
     const supabase = getSupabase();
     if (!supabase) return;
@@ -125,12 +112,10 @@ const App: React.FC = () => {
     }
   }, []); 
 
-  // --- 关键：恢复“任务通缉令”自动触发 ---
   useEffect(() => {
     if (tasks.length > 0) {
       const todayStr = formatDateKey(new Date());
       const todaysPending = tasks.filter(t => t.date === todayStr && !t.completed);
-      // 只有当 modalType 还没被手动设过，且确实有待办时弹出
       if (todaysPending.length > 0 && modalType === ModalType.NONE) {
         setModalType(ModalType.REMINDER);
       }
@@ -226,6 +211,15 @@ const App: React.FC = () => {
         }
       });
       const data = JSON.parse(response.text);
+      
+      // Check for duplicates before AI auto-add
+      const isDuplicate = tasks.some(t => t.date === data.date && t.title.toLowerCase() === data.title.toLowerCase());
+      if(isDuplicate) {
+          alert(`AI 想添加的任务 "${data.title}" 在 ${data.date} 已存在，已跳过。`);
+          setModalType(ModalType.NONE);
+          return;
+      }
+
       const newTask: Task = { id: crypto.randomUUID(), title: data.title, description: data.description || '', date: data.date, color: data.color || getRandomFreshColor(), completed: false };
       await saveTask(newTask);
       setModalType(ModalType.NONE);
@@ -244,7 +238,7 @@ const App: React.FC = () => {
       <Sticker icon={Crown} className="top-5 left-2 sm:top-10 sm:left-10 text-blue-300 rotate-[-12deg] scale-75 sm:scale-100" />
       <Sticker icon={Heart} className="top-20 -right-4 sm:top-40 sm:right-10 text-pink-400 rotate-[12deg] scale-75 sm:scale-100" />
 
-      {/* Responsive Header */}
+      {/* Header */}
       <div className="w-full max-w-6xl bg-white/90 backdrop-blur-md rounded-[2rem] shadow-xl border-2 sm:border-4 border-white p-3 sm:p-4 mb-4 sm:mb-8 flex flex-col md:flex-row justify-between items-center gap-4 relative z-10">
         <div className="flex items-center justify-between w-full md:w-auto">
           <div className="flex items-center gap-2">
@@ -283,7 +277,7 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Calendar Grid */}
+      {/* Grid */}
       <div className="w-full max-w-6xl relative z-10 select-none mb-8">
         <div className="grid grid-cols-7 mb-2 gap-1">
           {WEEKDAYS.map((day, i) => (
@@ -310,7 +304,6 @@ const App: React.FC = () => {
                   </span>
                 </div>
 
-                {/* --- 手机端显示圆点，电脑端显示文字条 --- */}
                 <div className="flex sm:hidden flex-wrap gap-1 px-0.5 mt-auto pb-1">
                   {dayTasks.map(task => (
                     <div key={task.id} className={`w-1.5 h-1.5 rounded-full ${task.completed ? 'bg-gray-200' : ''}`} style={!task.completed ? { backgroundColor: task.color || PERSONAL_COLOR } : {}} />
@@ -331,7 +324,7 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Monthly Notes */}
+      {/* Notes */}
       <div className="w-full max-w-6xl relative z-10 mb-20 sm:mb-12">
         <div className="bg-[#fffbeb] p-5 sm:p-8 rounded-3xl shadow-xl border-4 border-white rotate-1 hover:rotate-0 transition-transform">
           <div className="flex items-center gap-3 mb-3 text-yellow-700">
@@ -353,12 +346,8 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* --- 通缉令弹窗 (今日任务) --- */}
-      <Modal
-        isOpen={modalType === ModalType.REMINDER}
-        onClose={() => setModalType(ModalType.NONE)}
-        title="👿 今日任务通缉令"
-      >
+      {/* Reminder */}
+      <Modal isOpen={modalType === ModalType.REMINDER} onClose={() => setModalType(ModalType.NONE)} title="👿 今日任务通缉令">
         <div className="space-y-4">
           <div className="bg-red-50 border-2 border-red-100 rounded-2xl p-4 flex gap-3 items-center">
              <AlertCircle className="text-red-500" size={24} />
@@ -367,26 +356,18 @@ const App: React.FC = () => {
                 <p className="text-red-600 text-xs font-bold">今天的事今天毕，别让任务过夜</p>
              </div>
           </div>
-          
           <div className="max-h-[350px] overflow-y-auto task-scroll space-y-3 pr-1">
-            {tasks
-              .filter(t => t.date === formatDateKey(new Date()) && !t.completed)
-              .map(task => (
-                <div key={task.id} className="p-4 bg-white border-2 border-slate-100 rounded-2xl shadow-sm hover:border-blue-300 transition-colors">
+            {tasks.filter(t => t.date === formatDateKey(new Date()) && !t.completed).map(task => (
+                <div key={task.id} className="p-4 bg-white border-2 border-slate-100 rounded-2xl shadow-sm">
                   <div className="flex items-center gap-2 mb-2">
                      <div className="w-3 h-3 rounded-full" style={{backgroundColor: task.color || PERSONAL_COLOR}} />
                      <h4 className="font-black text-slate-800 text-lg">{task.title}</h4>
                   </div>
-                  <div className="bg-slate-50 rounded-xl p-3 text-sm text-slate-600 font-medium leading-relaxed">
-                    {task.description || '暂无详细描述...'}
-                  </div>
+                  <div className="bg-slate-50 rounded-xl p-3 text-sm text-slate-600 font-medium">{task.description || '暂无详细描述...'}</div>
                 </div>
               ))}
           </div>
-
-          <button onClick={() => setModalType(ModalType.NONE)} className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-all text-lg">
-            即刻启程！
-          </button>
+          <button onClick={() => setModalType(ModalType.NONE)} className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-xl shadow-blue-200 active:scale-95 transition-all text-lg">即刻启程！</button>
         </div>
       </Modal>
 
@@ -412,14 +393,26 @@ const App: React.FC = () => {
                 </div>
               ) : (
                 selectedDateTasks.map(task => (
-                  <div key={task.id} onClick={() => isSelectionMode && setSelectedTaskIds(prev => {
-                      const n = new Set(prev); n.has(task.id) ? n.delete(task.id) : n.add(task.id); return n;
-                  })} className={`p-4 border-2 rounded-2xl transition-all flex gap-3 items-start relative overflow-hidden ${isSelectionMode ? (selectedTaskIds.has(task.id) ? 'bg-blue-50 border-blue-400' : 'bg-white border-slate-100 opacity-60') : (task.completed ? 'bg-slate-50 opacity-60' : 'bg-white border-slate-100 shadow-sm')}`}>
-                    {!isSelectionMode && <button onClick={(e) => toggleTaskCompletion(e, task.id)} className={`mt-1 w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${task.completed ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300'}`}><Check size={14} strokeWidth={4}/></button>}
-                    <div className="flex-1" onClick={() => !isSelectionMode && (setEditingTask(task), setDrawerMode('form'))}>
+                  <div key={task.id} className={`p-4 border-2 rounded-2xl transition-all flex gap-3 items-center relative overflow-hidden group ${isSelectionMode ? (selectedTaskIds.has(task.id) ? 'bg-blue-50 border-blue-400' : 'bg-white border-slate-100 opacity-60') : (task.completed ? 'bg-slate-50 opacity-60' : 'bg-white border-slate-100 shadow-sm')}`}>
+                    {!isSelectionMode && <button onClick={(e) => toggleTaskCompletion(e, task.id)} className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${task.completed ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300'}`}><Check size={14} strokeWidth={4}/></button>}
+                    
+                    <div className="flex-1 cursor-pointer" onClick={() => !isSelectionMode && (setEditingTask(task), setDrawerMode('form'))}>
                       <h4 className={`font-black text-lg ${task.completed && !isSelectionMode ? 'line-through text-slate-400' : 'text-slate-800'}`} style={!task.completed && !isSelectionMode ? {color: task.color} : {}}>{task.title}</h4>
-                      <p className="text-sm text-slate-500 font-medium line-clamp-2 mt-1">{task.description}</p>
+                      {task.description && <p className="text-xs text-slate-500 font-medium line-clamp-1 mt-0.5">{task.description}</p>}
                     </div>
+
+                    {/* Quick Delete Button */}
+                    {!isSelectionMode && (
+                        <button 
+                          onClick={(e) => {
+                              e.stopPropagation();
+                              if(window.confirm(`确定要删除 "${task.title}" 吗？`)) deleteTask(task.id);
+                          }}
+                          className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all md:opacity-0 md:group-hover:opacity-100"
+                        >
+                            <Trash2 size={18} />
+                        </button>
+                    )}
                   </div>
                 ))
               )}
@@ -431,7 +424,7 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <TaskForm initialDate={selectedDateKey} existingTask={editingTask} initialColor={initialTaskColor} onSave={saveTask} onDelete={deleteTask} onBack={() => setDrawerMode('list')} />
+          <TaskForm allTasks={tasks} initialDate={selectedDateKey} existingTask={editingTask} initialColor={initialTaskColor} onSave={saveTask} onDelete={deleteTask} onBack={() => setDrawerMode('list')} />
         )}
       </Drawer>
 
