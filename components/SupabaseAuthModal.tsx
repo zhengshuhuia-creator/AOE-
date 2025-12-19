@@ -1,15 +1,22 @@
-
 import React, { useState, useEffect } from 'react';
-import { Database, LogIn, Key, Link as LinkIcon, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Database, LogIn, Key, Link as LinkIcon, AlertCircle, CheckCircle2, Download, Upload, Cloud, RefreshCw } from 'lucide-react';
 import { getSupabaseCreds, initSupabase, getSupabase, clearSupabaseCreds } from '../supabaseClient';
 
 interface SupabaseAuthModalProps {
   onLoginSuccess: () => void;
   onLogout: () => void;
   userEmail: string | null;
+  onExport: () => void;
+  onImport: () => void;
 }
 
-export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({ onLoginSuccess, onLogout, userEmail }) => {
+export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({ 
+  onLoginSuccess, 
+  onLogout, 
+  userEmail,
+  onExport,
+  onImport
+}) => {
   const [step, setStep] = useState<'config' | 'auth'>(() => getSupabaseCreds() ? 'auth' : 'config');
   
   // Config State
@@ -47,13 +54,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({ onLoginSuc
     }
   };
 
-  const handleClearConfig = () => {
-    clearSupabaseCreds();
-    setStep('config');
-    setUrl('');
-    setKey('');
-  };
-
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -78,7 +78,6 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({ onLoginSuc
         if (error) throw error;
         
         setMessage('✅ 登录成功！正在跳转...');
-        // Wait 1s for better UX before closing modal
         setTimeout(() => {
            onLoginSuccess();
         }, 1000);
@@ -93,34 +92,73 @@ export const SupabaseAuthModal: React.FC<SupabaseAuthModalProps> = ({ onLoginSuc
   // Logged In View
   if (userEmail) {
     return (
-      <div className="space-y-6 text-center">
-         <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-white shadow-lg">
-            <CheckCircle2 size={40} />
-         </div>
-         <h3 className="text-xl font-bold text-gray-800">已连接云端</h3>
-         <p className="text-gray-500 font-medium">当前账号: {userEmail}</p>
-         
-         <div className="bg-blue-50 p-4 rounded-xl text-left text-sm text-blue-800 border border-blue-100">
-           <p>✨ 你的数据正在通过 Supabase 实时同步。</p>
+      <div className="space-y-6">
+         {/* Status Header */}
+         <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-center">
+            <div className="w-16 h-16 bg-white text-green-500 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
+                <Cloud size={32} strokeWidth={2.5} />
+            </div>
+            <h3 className="text-xl font-black text-gray-800 tracking-tight">已连接 Supabase 云端</h3>
+            <p className="text-gray-500 font-medium text-sm mt-1">{userEmail}</p>
+            <div className="flex items-center justify-center gap-2 mt-4 text-xs font-bold text-green-700 bg-green-100/50 py-1.5 px-3 rounded-full inline-flex">
+                <RefreshCw size={12} className="animate-spin" />
+                实时同步中
+            </div>
          </div>
 
-         <button
-           onClick={() => {
-             if(confirm('确定要退出登录吗？本地数据将不再同步。')) {
-               onLogout();
-             }
-           }}
-           className="w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl hover:bg-red-100 transition-colors"
-         >
-           退出登录
-         </button>
+         {/* Data Management Section */}
+         <div className="space-y-3">
+            <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider pl-1">数据迁移 Migration</h4>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+               {/* Backup Button */}
+               <button 
+                 onClick={onExport}
+                 className="flex flex-col items-start p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-blue-200 hover:bg-blue-50 transition-all group active:scale-95"
+               >
+                  <div className="bg-blue-100 text-blue-600 p-2 rounded-lg mb-2 group-hover:bg-blue-200 transition-colors">
+                      <Download size={20} />
+                  </div>
+                  <span className="font-bold text-gray-700">备份云端数据</span>
+                  <span className="text-xs text-gray-400 mt-1 text-left">下载 JSON 备份到本地设备</span>
+               </button>
+
+               {/* Import Button */}
+               <button 
+                 onClick={onImport}
+                 className="flex flex-col items-start p-4 bg-white border-2 border-purple-100 rounded-2xl hover:border-purple-300 hover:bg-purple-50 transition-all group active:scale-95 relative overflow-hidden"
+               >
+                  <div className="absolute top-0 right-0 bg-purple-100 text-purple-600 text-[10px] font-bold px-2 py-1 rounded-bl-xl">
+                      Upload
+                  </div>
+                  <div className="bg-purple-100 text-purple-600 p-2 rounded-lg mb-2 group-hover:bg-purple-200 transition-colors">
+                      <Upload size={20} />
+                  </div>
+                  <span className="font-bold text-gray-700">恢复数据到云端</span>
+                  <span className="text-xs text-gray-400 mt-1 text-left">上传 JSON 并覆盖云端记录</span>
+               </button>
+            </div>
+         </div>
+
+         {/* Logout */}
+         <div className="pt-4 border-t border-gray-100">
+             <button
+               onClick={() => {
+                 if(confirm('确定要退出登录吗？本地数据将不再同步。')) {
+                   onLogout();
+                 }
+               }}
+               className="w-full py-3 text-red-400 font-bold text-sm hover:bg-red-50 hover:text-red-500 rounded-xl transition-colors"
+             >
+               退出登录 (Sign Out)
+             </button>
+         </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Steps Indicator */}
       <div className="flex items-center justify-center gap-2 mb-6">
         <div className={`h-2 flex-1 rounded-full ${step === 'config' ? 'bg-blue-500' : 'bg-green-500'}`} />
         <div className={`h-2 flex-1 rounded-full ${step === 'auth' ? 'bg-blue-500' : 'bg-gray-200'}`} />
